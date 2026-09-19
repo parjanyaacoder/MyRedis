@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-func readCommand(connection net.Conn) (*core.RedisCmd, error) {
+func readCommand(connection io.ReadWriter) (*core.RedisCmd, error) {
 	var buf []byte = make([]byte, 512)
 	n, err := connection.Read(buf[:]) // fires read system call - Blocking call
 	if err != nil {
@@ -30,11 +30,11 @@ func readCommand(connection net.Conn) (*core.RedisCmd, error) {
 	}, nil
 }
 
-func respondError(err error, connection net.Conn) {
+func respondError(err error, connection io.ReadWriter) {
 	connection.Write([]byte(fmt.Sprintf("-%s\r\n", err)))
 }
 
-func respond(command *core.RedisCmd, connection net.Conn) {
+func respond(command *core.RedisCmd, connection io.ReadWriter) {
 	err := core.EvalAndRespond(command, connection)
 	if err != nil {
 		respondError(err, connection)

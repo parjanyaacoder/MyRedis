@@ -9,6 +9,7 @@ import (
 )
 
 var RESP_NIL []byte = []byte("$-1\r\n")
+var RESP_OK []byte = []byte("+OK\r\n")
 
 func evalPing(args []string) []byte {
 	var b []byte
@@ -58,7 +59,7 @@ func evalSet(args []string) []byte {
 	}
 
 	Put(key, NewObj(value, exDurationMs))
-	return []byte("+OK\r\n")
+	return RESP_OK
 }
 
 func evalGet(args []string) []byte {
@@ -116,10 +117,10 @@ func evalDel(args []string) []byte {
 		}
 	}
 
-	return Encode(countDeleted, false);
+	return Encode(countDeleted, false)
 }
 
-func evalExpire(args []string, ) []byte {
+func evalExpire(args []string) []byte {
 	if len(args) <= 1 {
 		return Encode(errors.New("(error) ERR wrong number of arguments for 'expire' command"), false)
 	}
@@ -142,11 +143,16 @@ func evalExpire(args []string, ) []byte {
 	return []byte(":1\r\n")
 }
 
+func evalBGREWRITEAOF(args []string) []byte {
+	DumpAllAOF()
+	return RESP_OK
+}
+
 func EvalAndRespond(commands RedisCmds, connection io.ReadWriter) {
 	var response []byte
 	buf := bytes.NewBuffer(response)
 
-	for _, command := range(commands) {
+	for _, command := range commands {
 		switch command.Cmd {
 		case "PING":
 			buf.Write(evalPing(command.Args))
@@ -160,6 +166,8 @@ func EvalAndRespond(commands RedisCmds, connection io.ReadWriter) {
 			buf.Write(evalDel(command.Args))
 		case "EXPIRE":
 			buf.Write(evalExpire(command.Args))
+		case "BGREWRITEAOF":
+			buf.Write(evalBGREWRITEAOF(command.Args))
 		default:
 			buf.Write(evalPing(command.Args))
 		}

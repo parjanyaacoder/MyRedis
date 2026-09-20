@@ -117,5 +117,4 @@ func RunAsyncTCPServer() error {
 
 		}
 	}
-	return nil
 }

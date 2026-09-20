@@ -30,41 +30,43 @@ func evalPing(args []string) []byte {
 
 func evalSet(args []string) []byte {
 	if len(args) <= 1 {
-		return Encode(errors.New("(error) ERR wrong number of arguments for 'set' command"), false)
+		return Encode(errors.New("ERR wrong number of arguments for 'set' command"), false)
 	}
 
 	var key, value string
 	var exDurationMs int64 = -1
 
 	key, value = args[0], args[1]
+	oType, oEncoding := deduceTypeEncoding(value)
+
 	for i := 2; i < len(args); i++ {
 		switch args[i] {
 		case "EX", "ex":
 			{
 				i += 1
 				if i == len(args) {
-					return Encode(errors.New("(error) ERR syntax error"), false)
+					return Encode(errors.New("ERR syntax error"), false)
 				}
 
 				exDurationSec, err := strconv.ParseInt(args[3], 10, 64)
 				if err != nil {
-					return Encode(errors.New("(error) ERR value if not an integer or out of range"), false)
+					return Encode(errors.New("ERR value if not an integer or out of range"), false)
 				}
 
 				exDurationMs = exDurationSec * 1000
 			}
 		default:
-			return Encode(errors.New("(error) ERR syntax error"), false)
+			return Encode(errors.New("ERR syntax error"), false)
 		}
 	}
 
-	Put(key, NewObj(value, exDurationMs))
+	Put(key, NewObj(value, exDurationMs, oType, oEncoding))
 	return RESP_OK
 }
 
 func evalGet(args []string) []byte {
 	if len(args) != 1 {
-		return Encode(errors.New("(error) ERR wrong number of arguments for 'get' command"), false)
+		return Encode(errors.New("ERR wrong number of arguments for 'get' command"), false)
 	}
 
 	var key string = args[0]
@@ -84,7 +86,7 @@ func evalGet(args []string) []byte {
 
 func evalTtl(args []string) []byte {
 	if len(args) != 1 {
-		return Encode(errors.New("(error) ERR wrong number of arguments for 'ttl' command"), false)
+		return Encode(errors.New("ERR wrong number of arguments for 'ttl' command"), false)
 	}
 
 	var key string = args[0]
@@ -122,7 +124,7 @@ func evalDel(args []string) []byte {
 
 func evalExpire(args []string) []byte {
 	if len(args) <= 1 {
-		return Encode(errors.New("(error) ERR wrong number of arguments for 'expire' command"), false)
+		return Encode(errors.New("ERR wrong number of arguments for 'expire' command"), false)
 	}
 
 	var key string = args[0]
@@ -130,7 +132,7 @@ func evalExpire(args []string) []byte {
 	exDurationSec, err := strconv.ParseInt(args[1], 10, 64)
 
 	if err != nil {
-		return Encode(errors.New("(error) ERR value if not an integer or out of range"), false)
+		return Encode(errors.New("ERR value if not an integer or out of range"), false)
 	}
 
 	obj := Get(key)
@@ -146,6 +148,35 @@ func evalExpire(args []string) []byte {
 func evalBGREWRITEAOF(args []string) []byte {
 	DumpAllAOF()
 	return RESP_OK
+}
+
+func evalIncr(args []string) []byte {
+	if len(args) != 1 {
+		return Encode(errors.New("ERR wrong number of arguments for 'incr' command"), false)
+	}
+
+	var key string = args[0]
+
+	obj := Get(key)
+
+	if obj == nil {
+		obj = NewObj("0", -1, OBJ_TYPE_STRING, OBJ_ENCODING_INT)
+		Put(key, obj)
+	}
+
+	if err := assertType(obj.TypeEncoding, OBJ_TYPE_STRING); err != nil {
+		return Encode(err, false)
+	}
+
+	if err := assertEncoding(obj.TypeEncoding, OBJ_ENCODING_INT); err != nil {
+		return Encode(err, false)
+	}
+
+	i, _ := strconv.ParseInt(obj.Value.(string), 10, 64)
+	i++
+
+	obj.Value = strconv.FormatInt(i, 10)
+	return Encode(i, false)
 }
 
 func EvalAndRespond(commands RedisCmds, connection io.ReadWriter) {
@@ -168,6 +199,8 @@ func EvalAndRespond(commands RedisCmds, connection io.ReadWriter) {
 			buf.Write(evalExpire(command.Args))
 		case "BGREWRITEAOF":
 			buf.Write(evalBGREWRITEAOF(command.Args))
+		case "INCR":
+			buf.Write(evalIncr(command.Args))
 		default:
 			buf.Write(evalPing(command.Args))
 		}

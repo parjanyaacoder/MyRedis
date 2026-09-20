@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"strconv"
@@ -9,11 +10,11 @@ import (
 
 var RESP_NIL []byte = []byte("$-1\r\n")
 
-func evalPing(args []string, connection io.ReadWriter) error {
+func evalPing(args []string) []byte {
 	var b []byte
 
 	if len(args) >= 2 {
-		return errors.New("ERR Wrong number of arguments for the 'ping' command")
+		return Encode(errors.New("ERR Wrong number of arguments for the 'ping' command"), false)
 	}
 
 	if len(args) == 0 {
@@ -23,14 +24,12 @@ func evalPing(args []string, connection io.ReadWriter) error {
 		b = Encode(args[0], false)
 	}
 
-	_, err := connection.Write(b)
-
-	return err
+	return b
 }
 
-func evalSet(args []string, connection io.ReadWriter) error {
+func evalSet(args []string) []byte {
 	if len(args) <= 1 {
-		return errors.New("(error) ERR wrong number of arguments for 'set' command")
+		return Encode(errors.New("(error) ERR wrong number of arguments for 'set' command"), false)
 	}
 
 	var key, value string
@@ -43,29 +42,28 @@ func evalSet(args []string, connection io.ReadWriter) error {
 			{
 				i += 1
 				if i == len(args) {
-					return errors.New("(error) ERR syntax error")
+					return Encode(errors.New("(error) ERR syntax error"), false)
 				}
 
 				exDurationSec, err := strconv.ParseInt(args[3], 10, 64)
 				if err != nil {
-					return errors.New("(error) ERR value if not an integer or out of range")
+					return Encode(errors.New("(error) ERR value if not an integer or out of range"), false)
 				}
 
 				exDurationMs = exDurationSec * 1000
 			}
 		default:
-			return errors.New("(error) ERR syntax error")
+			return Encode(errors.New("(error) ERR syntax error"), false)
 		}
 	}
 
 	Put(key, NewObj(value, exDurationMs))
-	connection.Write([]byte("+OK\r\n"))
-	return nil
+	return []byte("+OK\r\n")
 }
 
-func evalGet(args []string, connection io.ReadWriter) error {
+func evalGet(args []string) []byte {
 	if len(args) != 1 {
-		return errors.New("(error) ERR wrong number of arguments for 'get' command")
+		return Encode(errors.New("(error) ERR wrong number of arguments for 'get' command"), false)
 	}
 
 	var key string = args[0]
@@ -73,22 +71,19 @@ func evalGet(args []string, connection io.ReadWriter) error {
 	obj := Get(key)
 
 	if obj == nil {
-		connection.Write(RESP_NIL)
-		return nil
+		return RESP_NIL
 	}
 
 	if obj.ExpiresAt != -1 && obj.ExpiresAt <= time.Now().UnixMilli() {
-		connection.Write(RESP_NIL)
-		return nil
+		return RESP_NIL
 	}
 
-	connection.Write(Encode(obj.Value, false))
-	return nil
+	return Encode(obj.Value, false)
 }
 
-func evalTtl(args []string, connection io.ReadWriter) error {
+func evalTtl(args []string) []byte {
 	if len(args) != 1 {
-		return errors.New("(error) ERR wrong number of arguments for 'ttl' command")
+		return Encode(errors.New("(error) ERR wrong number of arguments for 'ttl' command"), false)
 	}
 
 	var key string = args[0]
@@ -96,27 +91,23 @@ func evalTtl(args []string, connection io.ReadWriter) error {
 	obj := Get(key)
 
 	if obj == nil {
-		connection.Write([]byte(":-2\r\n"))
-		return nil
+		return []byte(":-2\r\n")
 	}
 
 	if obj.ExpiresAt == -1 {
-		connection.Write([]byte(":-1\r\n"))
-		return nil
+		return []byte(":-1\r\n")
 	}
 
 	durationMs := obj.ExpiresAt - time.Now().UnixMilli()
 
 	if durationMs < 0 {
-		connection.Write([]byte(":-2\r\n"))
-		return nil
+		return []byte(":-2\r\n")
 	}
 
-	connection.Write(Encode(int64(durationMs/1000), false))
-	return nil
+	return Encode(int64(durationMs/1000), false)
 }
 
-func evalDel(args []string, connection io.ReadWriter) error {
+func evalDel(args []string) []byte {
 	var countDeleted int64 = 0
 	for _, key := range args {
 
@@ -125,13 +116,12 @@ func evalDel(args []string, connection io.ReadWriter) error {
 		}
 	}
 
-	connection.Write(Encode(countDeleted, false))
-	return nil
+	return Encode(countDeleted, false);
 }
 
-func evalExpire(args []string, connection io.ReadWriter) error {
+func evalExpire(args []string, ) []byte {
 	if len(args) <= 1 {
-		return errors.New("(error) ERR wrong number of arguments for 'expire' command")
+		return Encode(errors.New("(error) ERR wrong number of arguments for 'expire' command"), false)
 	}
 
 	var key string = args[0]
@@ -139,37 +129,41 @@ func evalExpire(args []string, connection io.ReadWriter) error {
 	exDurationSec, err := strconv.ParseInt(args[1], 10, 64)
 
 	if err != nil {
-		return errors.New("(error) ERR value if not an integer or out of range")
+		return Encode(errors.New("(error) ERR value if not an integer or out of range"), false)
 	}
 
 	obj := Get(key)
 
 	if obj == nil {
-		connection.Write([]byte(":0\r\n"))
-		return nil
+		return []byte(":0\r\n")
 	}
 
 	obj.ExpiresAt = time.Now().UnixMilli() + exDurationSec*1000
-	connection.Write([]byte(":1\r\n"))
-
-	return nil
+	return []byte(":1\r\n")
 }
 
-func EvalAndRespond(command *RedisCmd, connection io.ReadWriter) error {
-	switch command.Cmd {
-	case "PING":
-		return evalPing(command.Args, connection)
-	case "SET":
-		return evalSet(command.Args, connection)
-	case "GET":
-		return evalGet(command.Args, connection)
-	case "TTL":
-		return evalTtl(command.Args, connection)
-	case "DEL":
-		return evalDel(command.Args, connection)
-	case "EXPIRE":
-		return evalExpire(command.Args, connection)
-	default:
-		return evalPing(command.Args, connection)
+func EvalAndRespond(commands RedisCmds, connection io.ReadWriter) {
+	var response []byte
+	buf := bytes.NewBuffer(response)
+
+	for _, command := range(commands) {
+		switch command.Cmd {
+		case "PING":
+			buf.Write(evalPing(command.Args))
+		case "SET":
+			buf.Write(evalSet(command.Args))
+		case "GET":
+			buf.Write(evalGet(command.Args))
+		case "TTL":
+			buf.Write(evalTtl(command.Args))
+		case "DEL":
+			buf.Write(evalDel(command.Args))
+		case "EXPIRE":
+			buf.Write(evalExpire(command.Args))
+		default:
+			buf.Write(evalPing(command.Args))
+		}
 	}
+
+	connection.Write(buf.Bytes())
 }

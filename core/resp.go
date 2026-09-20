@@ -87,30 +87,24 @@ func DecodeOne(data []byte) (interface{}, int, error) {
 	return nil, 0, nil
 }
 
-func Decode(data []byte) (interface{}, error) {
+func Decode(data []byte) ([]interface{}, error) {
 	if len(data) == 0 {
 		return nil, errors.New("No data")
 	}
 
-	value, _, err := DecodeOne(data)
-	return value, err
-}
+	var values []interface{} = make([]interface{}, 0)
+	var index int = 0
 
-func DecodeArrayStrings(data []byte) ([]string, error) {
-	value, err := Decode(data)
+	for index < len(data) {
+		value, delta, err := DecodeOne(data[index:])
 
-	if err != nil {
-		return nil, err
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+		index += delta
 	}
-
-	ts := value.([]interface{})
-	tokens := make([]string, len(ts))
-
-	for i := range tokens {
-		tokens[i] = ts[i].(string)
-	}
-
-	return tokens, nil
+	return values, nil
 }
 
 func Encode(value interface{}, isSimpleString bool) []byte {
@@ -124,6 +118,8 @@ func Encode(value interface{}, isSimpleString bool) []byte {
 		}
 	case int, int8, int16, int32, int64:
 		return []byte(fmt.Sprintf(":%d\r\n", v))
+	case error: 
+		return []byte(fmt.Sprintf("-%s\r\n", v))
 	}
 	return []byte{}
 }

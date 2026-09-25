@@ -78,7 +78,7 @@ func evalGet(args []string) []byte {
 		return RESP_NIL
 	}
 
-	if obj.ExpiresAt != -1 && obj.ExpiresAt <= time.Now().UnixMilli() {
+	if hasExpired(obj) {
 		return RESP_NIL
 	}
 
@@ -98,15 +98,17 @@ func evalTtl(args []string) []byte {
 		return []byte(":-2\r\n")
 	}
 
-	if obj.ExpiresAt == -1 {
+	exp, isExpirySet := getExpiry(obj)
+
+	if !isExpirySet {
 		return []byte(":-1\r\n")
 	}
 
-	durationMs := obj.ExpiresAt - time.Now().UnixMilli()
-
-	if durationMs < 0 {
+	if exp < uint64(time.Now().UnixMilli()) {
 		return []byte(":-2\r\n")
 	}
+
+	durationMs := exp - uint64(time.Now().UnixMilli())
 
 	return Encode(int64(durationMs/1000), false)
 }
@@ -142,7 +144,7 @@ func evalExpire(args []string) []byte {
 		return []byte(":0\r\n")
 	}
 
-	obj.ExpiresAt = time.Now().UnixMilli() + exDurationSec*1000
+	setExpiry(obj, exDurationSec*1000)
 	return []byte(":1\r\n")
 }
 
@@ -181,14 +183,14 @@ func evalIncr(args []string) []byte {
 }
 
 func evalInfo(args []string) []byte {
-	var info[] byte
+	var info []byte
 	buf := bytes.NewBuffer(info)
 	buf.WriteString("# Keyspace\r\n")
 
 	for i := range KeyspaceStat {
 		buf.WriteString(fmt.Sprintf("db%d:keys=%d, expires=0, avg_ttl=0\r\n", i, KeyspaceStat[i]["Keys"]))
 	}
-	return  Encode(buf.String(), false)
+	return Encode(buf.String(), false)
 }
 
 func evalClinet(args []string) []byte {
@@ -199,6 +201,10 @@ func evalLatency(args []string) []byte {
 	return Encode([]string{}, false)
 }
 
+func evalLru(args []string) []byte {
+	evictAllKeysLRU()
+	return RESP_OK
+}
 
 func EvalAndRespond(commands RedisCmds, connection io.ReadWriter) {
 	var response []byte
@@ -222,12 +228,14 @@ func EvalAndRespond(commands RedisCmds, connection io.ReadWriter) {
 			buf.Write(evalBGREWRITEAOF(command.Args))
 		case "INCR":
 			buf.Write(evalIncr(command.Args))
-		case "INFO": 
+		case "INFO":
 			buf.Write(evalInfo(command.Args))
-		case "CLIENT": 
+		case "CLIENT":
 			buf.Write(evalClinet(command.Args))
-		case "LATENCY": 
+		case "LATENCY":
 			buf.Write(evalLatency(command.Args))
+		case "LRU":
+			buf.Write(evalLru(command.Args))
 		default:
 			buf.Write(evalPing(command.Args))
 		}

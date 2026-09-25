@@ -9,4 +9,4 @@ var EvictionRatio float64 = 0.40
 
 var AOFFile string = "./MyRedis.aof"
 
-var EvictionStrategy string = "allkeys-random"
+var EvictionStrategy string = "allkeys-lru"

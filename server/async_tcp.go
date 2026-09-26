@@ -5,6 +5,9 @@ import (
 	"MyRedis/core"
 	"log"
 	"net"
+	"os"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -13,7 +16,31 @@ var concurrent_clients int = 0
 var cronFrequency time.Duration = 1 * time.Second
 var lastCronExecTime time.Time = time.Now()
 
-func RunAsyncTCPServer() error {
+const EngineStatus_WAITING int32 = 1 << 1
+const EngineStatus_BUSY int32 = 1 << 2
+const EngineStatus_SHUTTING_DOWN int32 = 1 << 3
+
+var eStatus int32 = EngineStatus_WAITING
+
+func WaitForSignal(wg *sync.WaitGroup, sigs chan os.Signal) {
+	defer wg.Done()
+	<-sigs
+
+	for atomic.LoadInt32(&eStatus) == EngineStatus_BUSY {
+	}
+
+	atomic.StoreInt32(&eStatus, EngineStatus_SHUTTING_DOWN)
+
+	core.Shutdown()
+	os.Exit(0)
+}
+
+func RunAsyncTCPServer(wg *sync.WaitGroup) error {
+	defer wg.Done()
+	defer func() {
+		atomic.StoreInt32(&eStatus, EngineStatus_SHUTTING_DOWN)
+	}()
+
 	log.Println("starting a asynchronous TCP server on", config.Host, config.Port)
 
 	max_clients := 20000
@@ -69,7 +96,7 @@ func RunAsyncTCPServer() error {
 		return err
 	}
 
-	for {
+	for atomic.LoadInt32(&eStatus) != EngineStatus_SHUTTING_DOWN {
 
 		if time.Now().After(lastCronExecTime.Add(cronFrequency)) {
 			core.DeleteExpiredKeys()
@@ -79,6 +106,13 @@ func RunAsyncTCPServer() error {
 		nevents, err := syscall.Kevent(KqueueFD, nil, events, nil)
 		if err != nil {
 			continue
+		}
+
+		if !atomic.CompareAndSwapInt32(&eStatus, EngineStatus_WAITING, EngineStatus_BUSY) {
+			switch eStatus {
+			case EngineStatus_SHUTTING_DOWN: 
+				return  nil
+			}
 		}
 
 		for i := 0; i < nevents; i++ {
@@ -114,7 +148,9 @@ func RunAsyncTCPServer() error {
 				}
 				respond(cmds, comm)
 			}
-
 		}
+
+		atomic.StoreInt32(&eStatus, EngineStatus_WAITING)
 	}
+	return  nil
 }

@@ -5,6 +5,10 @@ import (
 	"MyRedis/server"
 	"flag"
 	"log"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 )
 
 func setupFlags() {
@@ -16,6 +20,16 @@ func setupFlags() {
 func main() {
 	setupFlags()
 	log.Println("Starting MyRedis server on", config.Host, ":", config.Port)
-	server.RunAsyncTCPServer()
+
+	var sigs chan os.Signal = make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go server.RunAsyncTCPServer(&wg)
+	go server.WaitForSignal(&wg, sigs)
+
+	wg.Wait()
 
 }
